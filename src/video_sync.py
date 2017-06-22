@@ -2,30 +2,54 @@ import numpy as np
 import cv2
 import sys
 import subprocess
-from skimage.measure import structural_similarity as ssim
+import MySQLdb
 
 
-def sim(pic1, pic2):
-    pic_norm1 = pic1 / np.sqrt(np.sum(pic1 ** 2))
-    pic_norm2 = pic2 / np.sqrt(np.sum(pic2 ** 2))
+def object_init(filename):
+    data = []
+    with open(filename) as dfile:
+        for line in dfile:
+            data.append(json.loads(line))
+    return data
 
-    return np.sum(pic_norm1 * pic_norm2)
+def extract_attribute(j_object,attr):
+    attr_values = []
+    for i in xrange(0, len(j_object)):
+        attr_values.append(j_object[i][attr])
+    return attr_values
+
+def get_timeoffset(jsonfile1, jsonfile2):
+    db = MySQLdb.connect('localhost','root','carmera123','db_pings')
+
+    v1 = object_init(jsonfile1)
+    v2 = object_init(jsonfile2)
+
+    t1 = extract_attribute(v1, "timestamp")[0]/1000
+    t2 = extract_attribute(v2, "timestamp")[0]/1000
+
+    f1 = extract_attribute(v1, "file")[0]
+    f2 = extract_attribute(v2, "file")[0]
+
+    sensor_id1 = f1.split('-')[1]
+    sensor_id2 = f2.split('-')[1]
+
+    cur = db.cursor()
+
+    cmd1 = "SELECT * FROM raw_pings WHERE (" + "sensor_id=\'" + str(sensor_id1)
+    cmd1 += "\'" + " AND timestamp>" + str(t1 - 100000)
+    cmd1 += " AND timestamp<" + str(t1)
+    cmd1 += " AND json_blob LIKE \'%POWER_CHANGE%\') ORDER BY timestamp ASC LIMIT 1"
 
 
-def closest(pic, vid):
-    fps = 15
-    # int(vid.get(cv2.cv.CV_CAP_PROP_FPS))
-    best_sim = -1
-    offset = 0
-    #pic = cv2.cvtColor(pic, cv2.COLOR_BGR2GRAY)
-    for i in xrange(0, 8*fps):
-        ret, img = vid.read()
-        #img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        similarity = ssim(img, pic)
-        if similarity > best_sim:
-            best_sim = similarity
-            offset = vid.get(cv2.cv.CV_CAP_PROP_POS_MSEC)
-    return offset
+    cmd2 = "SELECT * FROM raw_pings WHERE (" + "sensor_id=\'" + str(sensor_id2)
+    cmd2 += "\'" + " AND timestamp>" + str(t2 - 100000)
+    cmd2 += " AND timestamp<" + str(t2)
+    cmd2 += " AND json_blob LIKE \'%POWER_CHANGE%\') ORDER BY timestamp ASC LIMIT 1"
+
+    res1 = cur.execute(cmd1)[1]
+    res2 = cur.execute(cmd2)[1]
+
+    return res1-res2
 
 def extract_images(file1, offset1, file2, offset2):
     cmd1 = ["ffmpeg", "-ss", str(offset1/1000),"-t", str(30), "-i", str(file1),"-r",
