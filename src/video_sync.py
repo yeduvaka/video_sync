@@ -3,6 +3,7 @@ import cv2
 import sys
 import subprocess
 import MySQLdb
+import json
 
 
 def object_init(filename):
