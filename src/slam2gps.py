@@ -6,6 +6,7 @@ import video_sync as vs
 import utm
 import math
 import random
+import sys
 
 def extract_gps_data(jsonfile):
     data = vs.object_init(jsonfile)
@@ -43,7 +44,7 @@ def time_sync(gps_data, slam_runs):
 
     return slam_runs
 
-def recover_homogenous_affine_transformation(p, p_prime):
+def find_affine_transformation(p, p_prime):
     '''
     Find the unique homogeneous affine transformation that
     maps a set of 3 points to another set of 3 points in 3D
@@ -83,7 +84,6 @@ def recover_homogenous_affine_transformation(p, p_prime):
                             (0, 0, 0, 1)))
 
 
-
 def transform_pt(point, trans_mat):
     a  = np.array([point[0], point[1], point[2], 1])
     ap = np.dot(a, trans_mat)[:3]
@@ -94,7 +94,7 @@ def sample_three(gps_data, slam_data):
     start = np.searchsorted(gps_data[:,0],slam_data[0][0],'left')
     end = np.searchsorted(gps_data[:,0], slam_data[-1][0],'left')
     
-    good_points = np.where(np.logical_and(gps_data[start:end,4] > -1, gps_data[start:end,4]<5))
+    good_points = np.where(np.logical_and(gps_data[start:end,4] > -1, gps_data[start:end,4]<20))
     indices = np.array(random.sample(good_points[0],3)) + start
     corsp_slam = []
     for t in gps_data[indices][:,0]:
@@ -103,44 +103,68 @@ def sample_three(gps_data, slam_data):
 
     return gps_data[indices][:,[0,2,3]], slam_data[corsp_slam]
 
-def scale_and_combine(gps_data, slam_runs):
-    final_data = []
-    for run in slam_runs:
-        if len(run) > 10:
+
+def sample_once(gps_data, slam_data):
+    while(True):
+        try:
             gps_samples,slam_samples =  sample_three(gps_data, slam_data)
             utm_samples = []
             for i in xrange(0,3):
                 u = list(utm.from_latlon(gps_samples[i][1], gps_samples[i][2]))[:2]
                 u.append(0)
                 utm_samples.append(u)
+            slam_samples = np.around(slam_samples,5)
+            A = find_affine_transformation(np.array(slam_samples[:,1:4]),np.array(utm_samples))  
+        except np.linalg.linalg.LinAlgError:
+            print "Trying again!"
+            continue
+        break
+    return A
 
-            A = recover_homogenous_affine_transformation(np.array(slam_samples[:,1:4]),np.array(utm_samples))
-            
-            slam_converted = np.zeros((len(slam_data),3))
-            
-            for i,obv in enumerate(slam_data):
-                slam_converted[i][0] = obv[0]
-                utm_conv = transform_pt(obv[1:],A)
-                gps_conv = utm.to_latlon(utm_conv[0], utm_conv[1],18, 'T')
-                slam_converted[i][1:3] = gps_conv
-            final_data.append(slam_converted)
+def sample_and_convert(gps_data, slam_data):
+    A = sample_once(gps_data, slam_data)
+    slam_converted = np.zeros((len(slam_data),3))
+    
+    for i,obv in enumerate(slam_data):
+        slam_converted[i][0] = obv[0]
+        utm_conv = transform_pt(obv[1:],A)
+        gps_conv = utm.to_latlon(utm_conv[0], utm_conv[1],18, 'T') 
+        slam_converted[i][1] = round(gps_conv[0],7)
+        slam_converted[i][2] = round(gps_conv[1],7)
 
-    return final_data
+    return slam_converted
 
+def scale_and_combine(gps_data, slam_data):
+    s1 = sample_and_convert(gps_data, slam_data)
+    s2 = sample_and_convert(gps_data, slam_data)
+    s3 = sample_and_convert(gps_data, slam_data)
+
+    final = (s1+s2+s3)/3
+
+    return s1
 
 def slam2gps():   
     jsonfile = sys.argv[1]
     frametrajectory = sys.argv[2]
     gps_data = extract_gps_data(jsonfile)
-    slam_data = extract_slam_data(frametrajectory)
-    slam_data = time_sync(slam_data, gps_data)
+    slam_runs = extract_slam_data(frametrajectory)
+    slam_runs= time_sync(gps_data,slam_runs)
+    
+    location_data_final = []
+    file = open(jsonfile[:-5]+"-slam.txt",'w')
+    file2 = open(jsonfile[:-5] + "-gps.txt", 'w')
 
-    try:
-        location_data_final = scale_and_combine(gps_data, slam_data)
-    except LinAlgError:
-        print "Singular matrix encountered. Run again if you think this is just a bad sample."
+    for slam_data in slam_runs:
+        if len(slam_data) > 50:        
+            slam_converted = scale_and_combine(gps_data, slam_data)
+            location_data_final.append(slam_converted)
 
-    return location_data_final
+    for x in gps_data:
+        file2.write(str(x[2]) + "," +str(x[3]) + "\n")
+
+    for run in location_data_final:
+        for x in run:
+            file.write(str(x[1]) + "," + str(x[2]) + "\n" )
 
 if __name__ == '__main__':
     slam2gps()
