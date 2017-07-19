@@ -9,20 +9,19 @@ def sample(gps_data, slam_data):
     start = np.searchsorted(gps_data[:,0],slam_data[0][0],'left')
     end = np.searchsorted(gps_data[:,0], slam_data[-1][0],'left')
     
-    good_points = np.where(np.logical_and(gps_data[start:end,4] > 0, gps_data[start:end,4]<6))
-
-    print len(good_points[0])
-    if len(good_points[0]) < 4:
-        good_points = np.where(np.logical_and(gps_data[start:end,4] > -1, gps_data[start:end,4]<20))
-        if len(good_points[0]) < 4:
+    good_points = np.where(np.logical_and(gps_data[start:end,4] > 0, gps_data[start:end,4]<6))[0]
+    print len(good_points)
+    if len(good_points) < 4:
+        good_points = list(np.where(np.logical_and(gps_data[start:end,4] > 0, gps_data[start:end,4]<15))[0])
+        good_points.append(0)
+        good_points.append(end -start)
+        if len(good_points) < 4:
             return [],[]
-    #good_points = list(good_points[0])
-    #good_points.append(0)
+
     good_points = eliminate_possible_duplicates(good_points)
     indices = np.array(good_points) + start
-    print start,end
     print indices
-    #indices = np.array(random.sample(good_points    ,10)) + start
+    #indices = np.array(random.sample(good_points[0],4)) + start
 
     corsp_slam = []
     for t in gps_data[:,0][indices]:
@@ -32,7 +31,7 @@ def sample(gps_data, slam_data):
     return gps_data[indices][:,[0,2,3]], slam_data[corsp_slam]
 
 def eliminate_possible_duplicates(points):
-    if len(points) < 10:
+    if len(points) < 5:
         return points
     min_dist = round(len(points)/10)
     new_points = []
@@ -42,6 +41,8 @@ def eliminate_possible_duplicates(points):
         if ((x - temp) >= min_dist):
             new_points.append(x)
             temp = x
+            if len(new_points) == len(points)/2:
+                break
     return new_points
 
 

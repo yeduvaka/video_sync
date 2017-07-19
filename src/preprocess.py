@@ -1,5 +1,11 @@
 import json
 import numpy as np
+import psycopg2 as psql
+
+hostname='localhost'
+username='carmera'
+password='carmera123'
+database='carmera'
 
 def object_init(filename):
     data = []
@@ -23,8 +29,32 @@ def extract_gps_data(jsonfile) :
     time = np.array(extract_attribute(data,"timestamp"))/1000
     frame = extract_attribute(data, "frame")
 
-    data_final = np.column_stack((time,frame,lat,lon,acc))
+    start_frame = 0
+    for i in xrange(0, len(frame)):
+        if   0 < frame[i] < 100:
+            start_frame = i
+            break
+
+    data_final = np.column_stack((time[start_frame:],frame[start_frame:],lat[start_frame:],lon[start_frame:],acc[start_frame:]))
     return data_final
+
+def extract_gps_from_sensor_data(jsonfile):
+    video = jsonfile.split('/')[-1]
+    conn = psql.connect(host=hostname, user=username, password=password,dbname= database)
+    cur = conn.cursor()
+    cmd =  "SELECT extract(epoch FROM timestamp),frame_number,st_y(snapped_location), st_x(snapped_location),accuracy FROM sensor_data WHERE filename='" + video + "'"
+    cur.execute(cmd)
+    data = cur.fetchall()
+    data = np.array(data)
+
+    start_frame = 0
+    for i in xrange(0, len(data)):
+        if   0 < data[i,1] < 100:
+            start_frame = i
+            break
+
+    return data[start_frame:]
+
 
 def extract_slam_data(trajectory):
     f = open(trajectory, "r")
@@ -37,6 +67,8 @@ def extract_slam_data(trajectory):
                 data = []
         else:
             l = line.split(" ")
+            ## Discarding the y-coordinate, might need to change this.
+            l[2] = 0
             data.append(l[0:4])
     runs.append(np.array(data,dtype='float'))
     return runs
@@ -52,7 +84,8 @@ def time_sync(gps_data, slam_runs):
     return slam_runs
 
 def preprocess(jsonfile, frametrajectory):
-    gps_data = extract_gps_data(jsonfile)
+    #gps_data = extract_gps_data(jsonfile)
+    gps_data = extract_gps_from_sensor_data(jsonfile)
     slam_runs = extract_slam_data(frametrajectory)
     slam_runs= time_sync(gps_data,slam_runs)
 
